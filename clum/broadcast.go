@@ -21,6 +21,7 @@ func (w *BroadcastWriter) Write(b []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	defer conn.Close()
 
 	return conn.Write(b)
 }
@@ -58,11 +59,13 @@ func (r *BroadcastReader) Read(b []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	defer listener.Close()
 
 	conn, err := listener.Accept()
 	if err != nil {
 		return 0, err
 	}
+	defer conn.Close()
 
 	return conn.Read(b)
 }
