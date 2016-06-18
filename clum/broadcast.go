@@ -54,7 +54,12 @@ func NewBroadcastReader(addr string) (r *BroadcastReader, err error) {
 }
 
 func (r *BroadcastReader) Read(b []byte) (n int, err error) {
-	conn, err := net.Dial("udp", r.addr)
+	listener, err := net.Listen("udp", r.addr)
+	if err != nil {
+		return 0, err
+	}
+
+	conn, err := listener.Accept()
 	if err != nil {
 		return 0, err
 	}
