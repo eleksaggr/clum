@@ -120,6 +120,16 @@ func (node *Node) handle(event Event) (err error) {
 		node.queueMutex.Unlock()
 	case Gossip:
 	case Leave:
+		for i, member := range node.members {
+			if member.ID == event.SenderId {
+				// Remove the member from the memberlist.
+				node.members = append(node.members[:i], node.members[i+1:]...)
+
+				node.queueMutex.Lock()
+				node.eventQueue = append(node.eventQueue, &event)
+				node.queueMutex.Unlock()
+			}
+		}
 	default:
 		err = errors.New("Unknown event type received.")
 	}
