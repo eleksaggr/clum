@@ -78,11 +78,22 @@ loop:
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
-				// Handle client here.
+
+				var event Event
+				decoder := gob.NewDecoder(conn)
+				decoder.Decode(&event)
+
+				if err := node.handle(event); err != nil {
+					return
+				}
 			}(conn)
 		}
 	}
 	// Close the stop channel.
 	close(node.stop)
 	return err
+}
+
+func (node *Node) handle(event Event) (err error) {
+	return nil
 }
