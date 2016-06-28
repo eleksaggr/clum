@@ -59,6 +59,7 @@ func New(host string) (node *Node, err error) {
 	return node, nil
 }
 
+// Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
 	failCounter := 0
 loop:
@@ -96,4 +97,9 @@ loop:
 
 func (node *Node) handle(event Event) (err error) {
 	return nil
+}
+
+// Stop stops execution of the node.
+func (node *Node) Stop() {
+	node.stop <- true
 }
