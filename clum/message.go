@@ -1,5 +1,11 @@
 package clum
 
+import (
+	"net"
+
+	"github.com/nu7hatch/gouuid"
+)
+
 type eventType uint
 
 const (
@@ -11,6 +17,11 @@ const (
 type LamportTime uint64
 
 type Event struct {
-	event       eventType
-	lamportTime LamportTime
+	SenderId uuid.UUID
+	Event    eventType
+
+	Addr net.IP
+	Port uint16
+
+	LamportTime LamportTime
 }
