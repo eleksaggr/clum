@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/nu7hatch/gouuid"
 )
@@ -21,6 +22,11 @@ type Node struct {
 	Addr net.IP
 	Port uint16
 	net.Listener
+
+	members []*Member
+
+	eventQueue []*Event
+	queueMutex *sync.Mutex
 
 	stop chan bool
 }
@@ -48,6 +54,11 @@ func New(host string) (node *Node, err error) {
 
 		Addr: addr,
 		Port: uint16(port),
+
+		members: make([]*Member, 0),
+
+		eventQueue: make([]*Event, 0),
+		queueMutex: &sync.Mutex{},
 
 		stop: make(chan bool, 1),
 	}
@@ -96,7 +107,24 @@ loop:
 }
 
 func (node *Node) handle(event Event) (err error) {
-	return nil
+	switch event.Event {
+	case Join:
+		node.members = append(node.members, &Member{
+			ID:   event.SenderId,
+			Addr: event.Addr,
+			Port: event.Port,
+		})
+
+		node.queueMutex.Lock()
+		node.eventQueue = append(node.eventQueue, &event)
+		node.queueMutex.Unlock()
+	case Gossip:
+	case Leave:
+	default:
+		err = errors.New("Unknown event type received.")
+	}
+
+	return err
 }
 
 // Stop stops execution of the node.
