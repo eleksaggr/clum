@@ -3,16 +3,19 @@ package clum
 import (
 	"encoding/gob"
 	"errors"
+	"math/rand"
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/nu7hatch/gouuid"
 )
 
 const (
 	// MaxConnFailures defines how many connection failures may happen, before the node terminates execution.
-	maxConnFailures = 5
+	maxConnFailures      = 5
+	communicationTimeout = time.Second * 3
 )
 
 // Node is the representation of a node in the cluster.
@@ -70,7 +73,7 @@ func New(host string) (node *Node, err error) {
 	return node, nil
 }
 
-// Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
+// Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method, additionally the node will gossip with other nodes. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
 	failCounter := 0
 loop:
@@ -104,6 +107,44 @@ loop:
 	// Close the stop channel.
 	close(node.stop)
 	return err
+}
+
+func (node *Node) gossip() {
+	lastGossipTime := time.Now()
+loop:
+	for {
+		select {
+		case <-node.stop:
+			break loop
+		default:
+			if time.Since(lastGossipTime) > communicationTimeout {
+				if len(node.eventQueue) != 0 {
+					var event *Event
+					node.queueMutex.Lock()
+					event = node.eventQueue[0]
+					node.eventQueue = node.eventQueue[1:]
+					node.queueMutex.Unlock()
+
+					// Select random peer to gossip with.
+					memberIndex := rand.Intn(len(node.members))
+
+					hostStr := node.members[memberIndex].Addr.String()
+					portStr := strconv.Itoa(int(node.members[memberIndex].Port))
+					hostPort := net.JoinHostPort(hostStr, portStr)
+
+					conn, err := net.Dial("tcp", hostPort)
+					if err != nil {
+						continue
+					}
+
+					encoder := gob.NewEncoder(conn)
+					encoder.Encode(event)
+				}
+
+				lastGossipTime = time.Now()
+			}
+		}
+	}
 }
 
 func (node *Node) handle(event Event) (err error) {
