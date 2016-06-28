@@ -1,8 +1,10 @@
 package clum
 
 import (
+	"encoding/gob"
 	"errors"
 	"net"
+	"strconv"
 
 	"github.com/nu7hatch/gouuid"
 )
@@ -16,7 +18,8 @@ const (
 type Node struct {
 	ID uuid.UUID
 
-	Host string
+	Addr net.IP
+	Port uint16
 	net.Listener
 
 	stop chan bool
@@ -29,10 +32,22 @@ func New(host string) (node *Node, err error) {
 		return nil, err
 	}
 
+	host, portStr, err := net.SplitHostPort(host)
+	if err != nil {
+		return nil, err
+	}
+
+	addr := net.ParseIP(host)
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, err
+	}
+
 	node = &Node{
 		ID: *id,
 
-		Host: host,
+		Addr: addr,
+		Port: uint16(port),
 
 		stop: make(chan bool, 1),
 	}
