@@ -4,7 +4,7 @@ type eventType uint
 
 const (
 	Join eventType = iota
-	Notify
+	Gossip
 	Leave
 )
 
