@@ -71,8 +71,31 @@ func New(host string) (node *Node, err error) {
 	return node, nil
 }
 
+// Join makes a node join a cluster by contacting a node under the address host.
+func (node *Node) Join(host string) (err error) {
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		return err
+	}
+
+	event := Event{
+		Event:    Join,
+		SenderID: node.ID,
+		Addr:     node.Addr,
+		Port:     node.Port,
+	}
+
+	encoder := gob.NewEncoder(conn)
+	if err = encoder.Encode(event); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method, additionally the node will gossip with other nodes. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
+	go node.gossip()
+
 	failCounter := 0
 loop:
 	for {
@@ -94,7 +117,9 @@ loop:
 
 				var event Event
 				decoder := gob.NewDecoder(conn)
-				decoder.Decode(&event)
+				if err := decoder.Decode(&event); err != nil {
+					return
+				}
 
 				if err := node.handle(event); err != nil {
 					return
