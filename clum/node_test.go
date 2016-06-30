@@ -25,13 +25,8 @@ func TestJoin(t *testing.T) {
 		t.Fatalf("Node 1: %v\n", err)
 	}
 
-	stopChan := make(chan bool)
-	go func(stop chan bool) {
-		if err := node1.Run(); err != nil {
-			t.Errorf("%v\n", err)
-		}
-		stop <- true
-	}(stopChan)
+	go node.Run()
+	go node1.Run()
 
 	portStr := strconv.Itoa(int(node1.Port))
 	hostPort := net.JoinHostPort(node1.Addr.String(), portStr)
@@ -39,14 +34,13 @@ func TestJoin(t *testing.T) {
 	if err := node.Join(hostPort); err != nil {
 		t.Errorf("Error during joining of other node.\nError: %v\n", err)
 	}
-	node1.Stop()
 
-	<-stopChan
-	close(stopChan)
-
-	if len(node1.Members()) != 1 {
-		t.Error("Node did not join cluster.")
+	time.Sleep(time.Millisecond * 100) // Without this we run into problems, on some systems.
+	if len(node.Members()) != 1 {
+		t.Error("Node did not leave cluster.")
 	}
+	node1.Stop()
+	node.Stop()
 }
 
 func TestLeave(t *testing.T) {
