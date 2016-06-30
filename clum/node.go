@@ -161,7 +161,7 @@ loop:
 
 func (node *Node) sendPeer(event *Event) (err error) {
 	if len(node.members) == 0 {
-		return errors.New("No members registered.")
+		return nil //TODO: Fix this. Should maybe tell the user the cluster is empty.
 	}
 
 	rand.Seed(time.Now().UTC().UnixNano())
