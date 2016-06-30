@@ -69,6 +69,20 @@ func TestHandleLeave(t *testing.T) {
 	}
 }
 
+func TestHandleWrongEvent(t *testing.T) {
+	node, err := tryCreateNode()
+	if err != nil {
+		t.Fatalf("%v\n", err)
+	}
+
+	event := Event{
+		Event: 255,
+	}
+	if err = node.handle(event); err == nil {
+		t.Error("Error during handling of unrecognized event.")
+	}
+}
+
 func tryCreateNode() (node *Node, err error) {
 	err = errors.New("Satisfy first loop condition.")
 	for i := 0; i <= maxPortTries && err != nil; i++ {
