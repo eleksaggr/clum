@@ -3,6 +3,7 @@ package clum
 import (
 	"encoding/gob"
 	"errors"
+	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -36,6 +37,7 @@ type Node struct {
 
 // New creates a new Node that listens on the address host.
 func New(host string) (node *Node, err error) {
+	log.Printf("Trying to create new node on %v\n", host)
 	id, err := uuid.NewV4()
 	if err != nil {
 		return nil, err
@@ -64,15 +66,22 @@ func New(host string) (node *Node, err error) {
 		stop: make(chan bool, 1),
 	}
 
-	if node.Listener, err = net.Listen("tcp", host); err != nil {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", host)
+	if err != nil {
 		return nil, err
 	}
 
+	if node.TCPListener, err = net.ListenTCP("tcp", tcpAddr); err != nil {
+		return nil, err
+	}
+
+	log.Printf("Created node with ID %v\n", node.ID.String())
 	return node, nil
 }
 
 // Join makes a node join a cluster by contacting a node under the address host.
 func (node *Node) Join(host string) (err error) {
+	log.Printf("Trying to join cluster on %v\n", host)
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
 		return err
@@ -85,49 +94,60 @@ func (node *Node) Join(host string) (err error) {
 		Port:     node.Port,
 	}
 
-	encoder := gob.NewEncoder(conn)
-	if err = encoder.Encode(event); err != nil {
+	if err = gob.NewEncoder(conn).Encode(event); err != nil {
 		return err
 	}
+
+	log.Printf("Joining cluster was successful.\n")
 	return nil
 }
 
 // Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method, additionally the node will gossip with other nodes. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
-	go node.gossip()
+	log.Printf("Starting gossip routine...\n")
+	// go node.gossip()
 
 	failCounter := 0
 loop:
 	for {
 		select {
 		case <-node.stop:
+			log.Printf("Stopping handle routine.\n")
 			break loop
 		default:
 			if failCounter >= maxConnFailures {
 				err = errors.New("Maximum amount of connection failures exceeded.")
 				break loop
 			}
+
+			log.Printf("Listening...\n")
 			conn, err := node.Accept()
 			if err != nil {
+				log.Printf("Connection error occured, retrying listening...\n")
 				failCounter++
 				continue
 			}
+
 			go func(conn net.Conn) {
 				defer conn.Close()
 
 				var event Event
 				decoder := gob.NewDecoder(conn)
 				if err := decoder.Decode(&event); err != nil {
+					log.Printf("An error occured during communication with a peer: %v\n", err)
 					return
 				}
 
+				log.Printf("Passing event to handle...\n")
 				if err := node.handle(event); err != nil {
+					log.Printf("An error occured during handling of an event: %v\n", err)
 					return
 				}
 			}(conn)
 		}
 	}
-	// Close the stop channel.
+
+	log.Printf("Cleaning up...\n")
 	close(node.stop)
 	return err
 }
@@ -138,10 +158,12 @@ loop:
 	for {
 		select {
 		case <-node.stop:
+			log.Printf("Stopping gossip routine.\n")
 			break loop
 		default:
 			if time.Since(lastGossipTime) > communicationTimeout {
 				if len(node.eventQueue) != 0 {
+					log.Printf("Processing next event in queue...\n")
 					var event *Event
 					node.queueMutex.Lock()
 					event = node.eventQueue[0]
@@ -157,11 +179,14 @@ loop:
 
 					conn, err := net.Dial("tcp", hostPort)
 					if err != nil {
+						log.Printf("Error during communcation with peer: %v\n", err)
 						continue
 					}
 
-					encoder := gob.NewEncoder(conn)
-					encoder.Encode(event)
+					if gob.NewEncoder(conn).Encode(event); err != nil {
+						log.Printf("Error during communication with peer: %v\n", err)
+						continue
+					}
 				}
 
 				lastGossipTime = time.Now()
@@ -171,8 +196,11 @@ loop:
 }
 
 func (node *Node) handle(event Event) (err error) {
+	log.Printf("Handling an event...\n")
 	switch event.Event {
 	case Join:
+		log.Printf("Join event received from peer.\n")
+		log.Printf("Event: %v\n", event)
 		node.members = append(node.members, &Member{
 			ID:   event.SenderID,
 			Addr: event.Addr,
@@ -182,7 +210,9 @@ func (node *Node) handle(event Event) (err error) {
 		node.queueMutex.Lock()
 		node.eventQueue = append(node.eventQueue, &event)
 		node.queueMutex.Unlock()
+		log.Printf("Members: %v\n", node.members)
 	case Leave:
+		log.Printf("Leave event received from peer.\n")
 		for i, member := range node.members {
 			if member.ID == event.SenderID {
 				// Remove the member from the memberlist.
@@ -194,6 +224,7 @@ func (node *Node) handle(event Event) (err error) {
 			}
 		}
 	default:
+		log.Printf("Unkown event received from peer.\n")
 		err = errors.New("Unknown event type received.")
 	}
 
