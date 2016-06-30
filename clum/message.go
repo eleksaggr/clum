@@ -13,6 +13,8 @@ const (
 	Join eventType = iota
 	// Leave means the node is leaving the cluster.
 	Leave
+	// Transfer means the node is transfering its members to the peer.
+	Transfer
 )
 
 // LamportTime is a timestamp used to reorder messages.
