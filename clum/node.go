@@ -82,23 +82,32 @@ func New(host string) (node *Node, err error) {
 // Join makes a node join a cluster by contacting a node under the address host.
 func (node *Node) Join(host string) (err error) {
 	log.Printf("Trying to join cluster on %v\n", host)
+
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
 		return err
 	}
 
-	event := Event{
+	event := &Event{
 		Event:    Join,
 		SenderID: node.ID,
 		Addr:     node.Addr,
 		Port:     node.Port,
 	}
 
-	if err = gob.NewEncoder(conn).Encode(event); err != nil {
+	if gob.NewEncoder(conn).Encode(event); err != nil {
 		return err
 	}
 
-	log.Printf("Joining cluster was successful.\n")
+	if gob.NewDecoder(conn).Decode(&event); err != nil {
+		return err
+	}
+
+	node.members = make([]*Member, len(event.Members))
+	for i, member := range event.Members {
+		node.members[i] = &member
+	}
+
 	return nil
 }
 
@@ -233,6 +242,28 @@ func (node *Node) handle(event Event) (err error) {
 		node.eventQueue = append(node.eventQueue, &event)
 		node.queueMutex.Unlock()
 		log.Printf("Members: %v\n", node.members)
+
+		portStr := strconv.Itoa(int(event.Port))
+		hostPort := net.JoinHostPort(event.Addr.String(), portStr)
+		conn, err := net.Dial("tcp", hostPort)
+		if err != nil {
+			return err
+		}
+
+		members := make([]Member, len(node.members))
+		for i, member := range node.members {
+			members[i] = *member
+		}
+		event := &Event{
+			SenderID: node.ID,
+			Addr:     event.Addr,
+			Port:     event.Port,
+			Members:  members,
+		}
+
+		if err := gob.NewEncoder(conn).Encode(event); err != nil {
+			return err
+		}
 	case Leave:
 		log.Printf("Leave event received from peer.\n")
 		for i, member := range node.members {
