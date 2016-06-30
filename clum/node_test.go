@@ -24,7 +24,7 @@ func TestHandleJoin(t *testing.T) {
 		Event:    Join,
 		SenderID: [16]byte{},
 
-		Addr: net.ParseIP("localhost"),
+		Addr: net.ParseIP("127.0.0.1"),
 		Port: 0,
 
 		LamportTime: 1,
@@ -124,7 +124,7 @@ func TestHandleLeaveNoMembers(t *testing.T) {
 		Event:    Leave,
 		SenderID: [16]byte{},
 
-		Addr: net.ParseIP("localhost"),
+		Addr: net.ParseIP("127.0.0.1"),
 		Port: 0,
 
 		LamportTime: 1,
@@ -150,7 +150,7 @@ func tryCreateNode() (node *Node, err error) {
 		port := basePort + rand.Intn(65536-basePort)
 
 		portStr := strconv.Itoa(port)
-		hostPort := net.JoinHostPort("localhost", portStr)
+		hostPort := net.JoinHostPort("127.0.0.1", portStr)
 
 		node, err = New(hostPort)
 	}
