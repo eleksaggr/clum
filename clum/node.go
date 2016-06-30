@@ -250,6 +250,7 @@ func (node *Node) handle(event Event) (err error) {
 			members[i] = *member
 		}
 		event := &Event{
+			Event:    Transfer,
 			SenderID: node.ID,
 			Addr:     event.Addr,
 			Port:     event.Port,
@@ -259,6 +260,7 @@ func (node *Node) handle(event Event) (err error) {
 		if err := gob.NewEncoder(conn).Encode(event); err != nil {
 			return err
 		}
+	case Transfer:
 	case Leave:
 		log.Printf("Leave event received from peer.\n")
 		for i, member := range node.members {
