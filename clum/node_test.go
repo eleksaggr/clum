@@ -83,6 +83,62 @@ func TestHandleWrongEvent(t *testing.T) {
 	}
 }
 
+func TestHandleLeaveUnknownMember(t *testing.T) {
+	node, err := tryCreateNode()
+	if err != nil {
+		t.Fatalf("%v\n", err)
+	}
+
+	node.members = append(node.members, &Member{
+		ID: [16]byte{},
+	})
+
+	event := Event{
+		Event:    Leave,
+		SenderID: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+
+		Addr: net.ParseIP("localhost"),
+		Port: 0,
+
+		LamportTime: 1,
+	}
+
+	if err = node.handle(event); err != nil {
+		t.Error("Error during handling of Leave event for unknown member.")
+	}
+
+	members := node.Members()
+	if len(members) != 1 {
+		t.Error("Member with different id has been removed by event.")
+	}
+}
+
+func TestHandleLeaveNoMembers(t *testing.T) {
+	node, err := tryCreateNode()
+	if err != nil {
+		t.Fatalf("%v\n", err)
+	}
+
+	event := Event{
+		Event:    Leave,
+		SenderID: [16]byte{},
+
+		Addr: net.ParseIP("localhost"),
+		Port: 0,
+
+		LamportTime: 1,
+	}
+
+	if err = node.handle(event); err != nil {
+		t.Error("Error during handling of Leave event.")
+	}
+
+	members := node.Members()
+	if len(members) != 0 {
+		t.Error("Members are not unmodified.")
+	}
+}
+
 func tryCreateNode() (node *Node, err error) {
 	err = errors.New("Satisfy first loop condition.")
 	for i := 0; i <= maxPortTries && err != nil; i++ {
