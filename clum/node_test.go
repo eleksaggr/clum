@@ -21,7 +21,7 @@ func TestHandleJoin(t *testing.T) {
 
 	event := Event{
 		Event:    Join,
-		SenderId: [16]byte{},
+		SenderID: [16]byte{},
 
 		Addr: net.ParseIP("localhost"),
 		Port: 0,
@@ -51,7 +51,7 @@ func TestHandleLeave(t *testing.T) {
 
 	event := Event{
 		Event:    Leave,
-		SenderId: [16]byte{},
+		SenderID: [16]byte{},
 
 		Addr: net.ParseIP("localhost"),
 		Port: 0,

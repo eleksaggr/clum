@@ -149,7 +149,7 @@ func (node *Node) handle(event Event) (err error) {
 	switch event.Event {
 	case Join:
 		node.members = append(node.members, &Member{
-			ID:   event.SenderId,
+			ID:   event.SenderID,
 			Addr: event.Addr,
 			Port: event.Port,
 		})
@@ -159,7 +159,7 @@ func (node *Node) handle(event Event) (err error) {
 		node.queueMutex.Unlock()
 	case Leave:
 		for i, member := range node.members {
-			if member.ID == event.SenderId {
+			if member.ID == event.SenderID {
 				// Remove the member from the memberlist.
 				node.members = append(node.members[:i], node.members[i+1:]...)
 
@@ -175,6 +175,7 @@ func (node *Node) handle(event Event) (err error) {
 	return err
 }
 
+// Members returns the members of the node.
 func (node *Node) Members() []*Member {
 	return node.members
 }
