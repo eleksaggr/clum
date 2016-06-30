@@ -98,16 +98,6 @@ func (node *Node) Join(host string) (err error) {
 	if gob.NewEncoder(conn).Encode(event); err != nil {
 		return err
 	}
-
-	if gob.NewDecoder(conn).Decode(&event); err != nil {
-		return err
-	}
-
-	node.members = make([]*Member, len(event.Members))
-	for i, member := range event.Members {
-		node.members[i] = &member
-	}
-
 	return nil
 }
 
@@ -129,7 +119,6 @@ loop:
 				break loop
 			}
 
-			log.Printf("Listening...\n")
 			conn, err := node.Accept()
 			if err != nil {
 				log.Printf("Connection error occured, retrying listening...\n")
@@ -161,7 +150,7 @@ loop:
 		SenderID: node.ID,
 	}
 
-	if err := node.sendPeer(event); err != nil {
+	if err = node.sendPeer(event); err != nil {
 		log.Printf("Error during communication with a peer: %v\n", err)
 	}
 
@@ -174,6 +163,8 @@ func (node *Node) sendPeer(event *Event) (err error) {
 	if len(node.members) == 0 {
 		return errors.New("No members registered.")
 	}
+
+	rand.Seed(time.Now().UTC().UnixNano())
 	// Select random peer to gossip with.
 	memberIndex := rand.Intn(len(node.members))
 
@@ -185,6 +176,7 @@ func (node *Node) sendPeer(event *Event) (err error) {
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
 	if gob.NewEncoder(conn).Encode(event); err != nil {
 		return err
@@ -226,17 +218,10 @@ func (node *Node) handle(event Event) (err error) {
 	switch event.Event {
 	case Join:
 		log.Printf("Join event received from peer.\n")
-		log.Printf("Event: %v\n", event)
-		node.members = append(node.members, &Member{
-			ID:   event.SenderID,
-			Addr: event.Addr,
-			Port: event.Port,
-		})
 
 		node.queueMutex.Lock()
 		node.eventQueue = append(node.eventQueue, &event)
 		node.queueMutex.Unlock()
-		log.Printf("Members: %v\n", node.members)
 
 		portStr := strconv.Itoa(int(event.Port))
 		hostPort := net.JoinHostPort(event.Addr.String(), portStr)
@@ -244,23 +229,44 @@ func (node *Node) handle(event Event) (err error) {
 		if err != nil {
 			return err
 		}
+		defer conn.Close()
 
 		members := make([]Member, len(node.members))
 		for i, member := range node.members {
 			members[i] = *member
 		}
-		event := &Event{
+		members = append(members, Member{
+			ID:   node.ID,
+			Addr: node.Addr,
+			Port: node.Port,
+		})
+
+		eventResponse := &Event{
 			Event:    Transfer,
 			SenderID: node.ID,
-			Addr:     event.Addr,
-			Port:     event.Port,
+			Addr:     node.Addr,
+			Port:     node.Port,
 			Members:  members,
 		}
 
-		if err := gob.NewEncoder(conn).Encode(event); err != nil {
+		node.members = append(node.members, &Member{
+			ID:   event.SenderID,
+			Addr: event.Addr,
+			Port: event.Port,
+		})
+
+		log.Printf("Members: %v\n", len(node.members))
+
+		if err := gob.NewEncoder(conn).Encode(eventResponse); err != nil {
+			log.Printf("Error during encoding: %v\n", err)
 			return err
 		}
 	case Transfer:
+		node.members = make([]*Member, len(event.Members))
+		for i, member := range event.Members {
+			node.members[i] = &member
+		}
+		log.Printf("Members: %v\n", node.members)
 	case Leave:
 		log.Printf("Leave event received from peer.\n")
 		for i, member := range node.members {
@@ -273,8 +279,9 @@ func (node *Node) handle(event Event) (err error) {
 				node.queueMutex.Unlock()
 			}
 		}
+		log.Printf("Members: %v\n", len(node.members))
 	default:
-		log.Printf("Unkown event received from peer.\n")
+		log.Printf("Unknown event received from peer.\n")
 		err = errors.New("Unknown event type received.")
 	}
 
@@ -289,6 +296,6 @@ func (node *Node) Members() []*Member {
 // Stop stops execution of the node.
 func (node *Node) Stop() {
 	// Set TCP timeout so listener will die.
-	node.SetDeadline(time.Now().Add(time.Second))
+	node.SetDeadline(time.Now())
 	node.stop <- true
 }
