@@ -155,6 +155,15 @@ loop:
 			}(conn)
 		}
 	}
+	log.Printf("Trying to leave cluster...\n")
+	event := &Event{
+		Event:    Leave,
+		SenderID: node.ID,
+	}
+
+	if err := node.sendPeer(event); err != nil {
+		log.Printf("Error during communication with a peer: %v\n", err)
+	}
 
 	log.Printf("Cleaning up...\n")
 	close(node.stop)
