@@ -49,31 +49,31 @@ func TestJoin(t *testing.T) {
 	}
 }
 
-func TestHandleJoin(t *testing.T) {
-	node, err := tryCreateNode()
-	if err != nil {
-		t.Fatalf("%v\n", err)
-	}
-
-	event := Event{
-		Event:    Join,
-		SenderID: [16]byte{},
-
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 0,
-
-		LamportTime: 1,
-	}
-
-	if err = node.handle(event); err != nil {
-		t.Error("Error during handling of Join event.")
-	}
-
-	members := node.Members()
-	if len(members) != 1 {
-		t.Error("Member has not been added by event.")
-	}
-}
+// func TestHandleJoin(t *testing.T) {
+// 	node, err := tryCreateNode()
+// 	if err != nil {
+// 		t.Fatalf("%v\n", err)
+// 	}
+//
+// 	event := Event{
+// 		Event:    Join,
+// 		SenderID: [16]byte{},
+//
+// 		Addr: net.ParseIP("127.0.0.1"),
+// 		Port: 0,
+//
+// 		LamportTime: 1,
+// 	}
+//
+// 	if err = node.handle(event); err != nil {
+// 		t.Error("Error during handling of Join event.")
+// 	}
+//
+// 	members := node.Members()
+// 	if len(members) != 1 {
+// 		t.Error("Member has not been added by event.")
+// 	}
+// }
 
 func TestHandleLeave(t *testing.T) {
 	node, err := tryCreateNode()
