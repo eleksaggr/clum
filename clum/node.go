@@ -201,25 +201,11 @@ loop:
 					node.eventQueue = node.eventQueue[1:]
 					node.queueMutex.Unlock()
 
-					// Select random peer to gossip with.
-					memberIndex := rand.Intn(len(node.members))
-
-					hostStr := node.members[memberIndex].Addr.String()
-					portStr := strconv.Itoa(int(node.members[memberIndex].Port))
-					hostPort := net.JoinHostPort(hostStr, portStr)
-
-					conn, err := net.Dial("tcp", hostPort)
-					if err != nil {
-						log.Printf("Error during communcation with peer: %v\n", err)
-						continue
-					}
-
-					if gob.NewEncoder(conn).Encode(event); err != nil {
-						log.Printf("Error during communication with peer: %v\n", err)
+					if err := node.sendPeer(event); err != nil {
+						log.Printf("An error occured during communication with a peer: %v\n", err)
 						continue
 					}
 				}
-
 				lastGossipTime = time.Now()
 			}
 		}
