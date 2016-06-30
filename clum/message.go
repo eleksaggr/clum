@@ -26,5 +26,7 @@ type Event struct {
 	Addr net.IP
 	Port uint16
 
+	Members []Member
+
 	LamportTime LamportTime
 }
