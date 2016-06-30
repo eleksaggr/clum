@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"testing"
+	"time"
 )
 
 const (
@@ -140,6 +141,7 @@ func TestHandleLeaveNoMembers(t *testing.T) {
 }
 
 func tryCreateNode() (node *Node, err error) {
+	rand.Seed(time.Now().UTC().UnixNano())
 	err = errors.New("Satisfy first loop condition.")
 	for i := 0; i <= maxPortTries && err != nil; i++ {
 		if i == maxPortTries {
