@@ -49,31 +49,41 @@ func TestJoin(t *testing.T) {
 	}
 }
 
-// func TestHandleJoin(t *testing.T) {
-// 	node, err := tryCreateNode()
-// 	if err != nil {
-// 		t.Fatalf("%v\n", err)
-// 	}
-//
-// 	event := Event{
-// 		Event:    Join,
-// 		SenderID: [16]byte{},
-//
-// 		Addr: net.ParseIP("127.0.0.1"),
-// 		Port: 0,
-//
-// 		LamportTime: 1,
-// 	}
-//
-// 	if err = node.handle(event); err != nil {
-// 		t.Error("Error during handling of Join event.")
-// 	}
-//
-// 	members := node.Members()
-// 	if len(members) != 1 {
-// 		t.Error("Member has not been added by event.")
-// 	}
-// }
+func TestLeave(t *testing.T) {
+	node, err := tryCreateNode()
+	if err != nil {
+		t.Fatalf("Node 0: %v\n", err)
+	}
+
+	node1, err := tryCreateNode()
+	if err != nil {
+		t.Fatalf("Node 1: %v\n", err)
+	}
+
+	go node.Run()
+	stopChan := make(chan bool)
+	go func(stop chan bool) {
+		if err := node1.Run(); err != nil {
+			t.Errorf("%v\n", err)
+		}
+		stop <- true
+	}(stopChan)
+
+	portStr := strconv.Itoa(int(node1.Port))
+	hostPort := net.JoinHostPort(node1.Addr.String(), portStr)
+
+	if err := node.Join(hostPort); err != nil {
+		t.Errorf("Error during joining of other node.\nError: %v\n", err)
+	}
+	node1.Stop()
+
+	<-stopChan
+	close(stopChan)
+
+	if len(node.Members()) != 0 {
+		t.Error("Node did not leave cluster.")
+	}
+}
 
 func TestHandleLeave(t *testing.T) {
 	node, err := tryCreateNode()
