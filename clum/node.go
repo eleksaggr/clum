@@ -58,8 +58,6 @@ func New(host string) (node *Node, err error) {
 		Addr: addr,
 		Port: uint16(port),
 
-		members: make([]*Member, 0),
-
 		eventQueue: make([]*Event, 0),
 		queueMutex: &sync.Mutex{},
 
@@ -159,7 +157,6 @@ func (node *Node) handle(event Event) (err error) {
 		node.queueMutex.Lock()
 		node.eventQueue = append(node.eventQueue, &event)
 		node.queueMutex.Unlock()
-	case Gossip:
 	case Leave:
 		for i, member := range node.members {
 			if member.ID == event.SenderId {
@@ -176,6 +173,10 @@ func (node *Node) handle(event Event) (err error) {
 	}
 
 	return err
+}
+
+func (node *Node) Members() []*Member {
+	return node.members
 }
 
 // Stop stops execution of the node.
