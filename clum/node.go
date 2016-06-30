@@ -24,7 +24,7 @@ type Node struct {
 
 	Addr net.IP
 	Port uint16
-	net.Listener
+	*net.TCPListener
 
 	members []*Member
 
@@ -207,5 +207,7 @@ func (node *Node) Members() []*Member {
 
 // Stop stops execution of the node.
 func (node *Node) Stop() {
+	// Set TCP timeout so listener will die.
+	node.SetDeadline(time.Now().Add(time.Second))
 	node.stop <- true
 }
