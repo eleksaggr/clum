@@ -1,4 +1,4 @@
-# clum
+# clum [![Build Status](https://travis-ci.org/zillolo/clum.svg?branch=master)](https://travis-ci.org/zillolo/clum)
 
 **Clum** is a utility to manage clusters in Go.
 
