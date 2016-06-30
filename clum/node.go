@@ -41,12 +41,12 @@ func New(host string) (node *Node, err error) {
 		return nil, err
 	}
 
-	host, portStr, err := net.SplitHostPort(host)
+	hostStr, portStr, err := net.SplitHostPort(host)
 	if err != nil {
 		return nil, err
 	}
 
-	addr := net.ParseIP(host)
+	addr := net.ParseIP(hostStr)
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return nil, err
