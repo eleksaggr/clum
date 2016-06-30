@@ -152,6 +152,28 @@ loop:
 	return err
 }
 
+func (node *Node) sendPeer(event *Event) (err error) {
+	if len(node.members) == 0 {
+		return errors.New("No members registered.")
+	}
+	// Select random peer to gossip with.
+	memberIndex := rand.Intn(len(node.members))
+
+	hostStr := node.members[memberIndex].Addr.String()
+	portStr := strconv.Itoa(int(node.members[memberIndex].Port))
+	hostPort := net.JoinHostPort(hostStr, portStr)
+
+	conn, err := net.Dial("tcp", hostPort)
+	if err != nil {
+		return err
+	}
+
+	if gob.NewEncoder(conn).Encode(event); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (node *Node) gossip() {
 	lastGossipTime := time.Now()
 loop:
