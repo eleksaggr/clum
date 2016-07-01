@@ -159,26 +159,49 @@ loop:
 	return err
 }
 
-func (node *Node) sendPeer(event *Event) (err error) {
-	if len(node.members) == 0 {
-		return nil //TODO: Fix this. Should maybe tell the user the cluster is empty.
+// sendToMember sends an Event to a Member.
+func (node *Node) sendToMember(member *Member, event *Event) (err error) {
+	if member == nil || event == nil {
+		return errors.New("Member/Event may not be nil.")
 	}
 
-	rand.Seed(time.Now().UTC().UnixNano())
-	// Select random peer to gossip with.
-	memberIndex := rand.Intn(len(node.members))
+	// Convert host and port to a string.
+	host := member.Addr.String()
+	port := strconv.Itoa(int(member.Port))
+	hostPort := net.JoinHostPort(host, port)
 
-	hostStr := node.members[memberIndex].Addr.String()
-	portStr := strconv.Itoa(int(node.members[memberIndex].Port))
-	hostPort := net.JoinHostPort(hostStr, portStr)
-
+	// Connect to member.
 	conn, err := net.Dial("tcp", hostPort)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	// Set event sender id.
+	event.SenderID = node.ID
+	// Set time in event and increment it.
+	event.Time = node.clock.Time()
+	node.clock.Increment()
+
+	// Send event to member.
 	if gob.NewEncoder(conn).Encode(event); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (node *Node) sendToRandomMember(event *Event) (err error) {
+	if event == nil {
+		return errors.New("Event may not be nil.")
+	}
+
+	if len(node.members) == 0 {
+		return errors.New("No members registered.")
+	}
+	rand.Seed(time.Now().UTC().UnixNano())
+	index := rand.Intn(len(node.members))
+
+	if err := node.sendToMember(node.members[index], event); err != nil {
 		return err
 	}
 	return nil
