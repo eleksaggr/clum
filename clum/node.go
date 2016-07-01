@@ -264,51 +264,80 @@ func (node *Node) handle(event Event) (err error) {
 			Port: node.Port,
 		})
 
-		eventResponse := &Event{
-			Event:    Transfer,
-			SenderID: node.ID,
-			Addr:     node.Addr,
-			Port:     node.Port,
-			Members:  members,
-		}
+		response.Members = members
 
-		node.members = append(node.members, &Member{
-			ID:   event.SenderID,
-			Addr: event.Addr,
-			Port: event.Port,
-		})
-
-		log.Printf("Members: %v\n", len(node.members))
-
-		if err := gob.NewEncoder(conn).Encode(eventResponse); err != nil {
-			log.Printf("Error during encoding: %v\n", err)
+		log.Printf("Transfering the following members: %v\n", response.Members)
+		if err = node.sendToMember(&event.Origin, response); err != nil {
 			return err
 		}
+
+		node.addMember(&event.Origin)
 	case Transfer:
-		node.members = make([]*Member, len(event.Members))
-		for i, member := range event.Members {
-			node.members[i] = &member
+		for _, m := range event.Members {
+			node.addMember(&m)
 		}
 		log.Printf("Members: %v\n", node.members)
 	case Leave:
 		log.Printf("Leave event received from peer.\n")
-		for i, member := range node.members {
-			if member.ID == event.SenderID {
-				// Remove the member from the memberlist.
-				node.members = append(node.members[:i], node.members[i+1:]...)
-
-				node.queueMutex.Lock()
-				node.eventQueue = append(node.eventQueue, &event)
-				node.queueMutex.Unlock()
-			}
+		if err = node.removeMember(event.SenderID); err != nil {
+			log.Printf("Tried to remove an unknown member.")
 		}
-		log.Printf("Members: %v\n", len(node.members))
+
+		log.Printf("Removed member with the id %v", event.SenderID.String())
+		// Add leave event to eventqueue.
+		node.addEvent(event)
 	default:
 		log.Printf("Unknown event received from peer.\n")
 		err = errors.New("Unknown event type received.")
+
+	}
+	return err
+}
+
+func (node *Node) addEvent(event *Event) (err error) {
+	if event == nil {
+		return errors.New("Event may not be nil.")
 	}
 
-	return err
+	event.Hops++
+	node.eventQueue = append(node.eventQueue, event)
+	return nil
+}
+
+func (node *Node) addMember(member *Member) (err error) {
+	if member == nil {
+		return errors.New("Member may not be nil.")
+	}
+
+	found := false
+	for _, m := range node.members {
+		if m.ID == member.ID {
+			found = true
+		}
+	}
+
+	if found {
+		return errors.New("Member already registered with node.")
+	}
+
+	node.members = append(node.members, member)
+	log.Printf("Members: %v\n", node.members)
+	return nil
+}
+
+func (node *Node) removeMember(id uuid.UUID) (err error) {
+	found := false
+	for i, m := range node.members {
+		if m.ID == id {
+			node.members = append(node.members[:i], node.members[i+1:]...)
+			found = true
+		}
+	}
+
+	if !found {
+		return errors.New("Member has not been found in memberlist.")
+	}
+	return nil
 }
 
 // Members returns the members of the node.
