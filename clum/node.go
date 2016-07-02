@@ -28,7 +28,7 @@ type Node struct {
 	Port uint16
 	*net.TCPListener
 
-	members []*Member
+	members MemberList
 
 	eventQueue []*Event
 	mutex      *sync.Mutex
@@ -181,6 +181,22 @@ loop:
 	log.Printf("Cleaning up...\n")
 	close(node.stop)
 	return err
+}
+
+func (node *Node) receive(conn net.Conn) (event *Event, err error) {
+	if conn == nil {
+		return nil, errors.New("Connection may not be nil.")
+	}
+
+	if err := gob.NewDecoder(conn).Decode(event); err != nil {
+		return nil, err
+	}
+
+	if event.Time > node.clock.Time() {
+		node.clock.Set(event.Time)
+	}
+	node.clock.Increment()
+	return event, nil
 }
 
 // sendToMember sends an Event to a Member.
