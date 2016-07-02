@@ -1,10 +1,6 @@
 package clum
 
-import (
-	"net"
-
-	"github.com/nu7hatch/gouuid"
-)
+import "github.com/nu7hatch/gouuid"
 
 type eventType uint
 
@@ -17,18 +13,17 @@ const (
 	Transfer
 )
 
-// LamportTime is a timestamp used to reorder messages.
-type LamportTime uint64
-
 // Event is the representation of an event caused by a node.
 type Event struct {
 	SenderID uuid.UUID
 	Event    eventType
 
-	Addr net.IP
-	Port uint16
+	Origin Member
 
 	Members []Member
 
-	LamportTime LamportTime
+	Time uint64
+	Hops uint
+
+	TransferRequired bool
 }

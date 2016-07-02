@@ -17,6 +17,7 @@ const (
 	// MaxConnFailures defines how many connection failures may happen, before the node terminates execution.
 	maxConnFailures      = 5
 	communicationTimeout = time.Second * 3
+	MaximumHops          = 10
 )
 
 // Node is the representation of a node in the cluster.
@@ -30,7 +31,9 @@ type Node struct {
 	members []*Member
 
 	eventQueue []*Event
-	queueMutex *sync.Mutex
+	mutex      *sync.Mutex
+
+	clock LogicalClock
 
 	stop chan bool
 }
@@ -38,22 +41,27 @@ type Node struct {
 // New creates a new Node that listens on the address host.
 func New(host string) (node *Node, err error) {
 	log.Printf("Trying to create new node on %v\n", host)
+
+	// Generate a unique UUID for the node.
 	id, err := uuid.NewV4()
 	if err != nil {
 		return nil, err
 	}
 
+	// Split the hostname and the port from the host argument.
 	hostStr, portStr, err := net.SplitHostPort(host)
 	if err != nil {
 		return nil, err
 	}
 
+	// Bring host and port into the correct format.
 	addr := net.ParseIP(hostStr)
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return nil, err
 	}
 
+	// Create a new node with the given details.
 	node = &Node{
 		ID: *id,
 
@@ -61,16 +69,18 @@ func New(host string) (node *Node, err error) {
 		Port: uint16(port),
 
 		eventQueue: make([]*Event, 0),
-		queueMutex: &sync.Mutex{},
+		mutex:      &sync.Mutex{},
+
+		clock: &LamportClock{},
 
 		stop: make(chan bool, 1),
 	}
 
+	// Create a tcp listener with the host argument.
 	tcpAddr, err := net.ResolveTCPAddr("tcp", host)
 	if err != nil {
 		return nil, err
 	}
-
 	if node.TCPListener, err = net.ListenTCP("tcp", tcpAddr); err != nil {
 		return nil, err
 	}
@@ -83,28 +93,33 @@ func New(host string) (node *Node, err error) {
 func (node *Node) Join(host string) (err error) {
 	log.Printf("Trying to join cluster on %v\n", host)
 
-	conn, err := net.Dial("tcp", host)
+	event := &Event{
+		Origin: Member{
+			ID:   node.ID,
+			Addr: node.Addr,
+			Port: node.Port,
+		},
+		TransferRequired: true,
+	}
+
+	host, portStr, err := net.SplitHostPort(host)
+	if err != nil {
+		return err
+	}
+	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return err
 	}
 
-	event := &Event{
-		Event:    Join,
-		SenderID: node.ID,
-		Addr:     node.Addr,
-		Port:     node.Port,
-	}
-
-	if gob.NewEncoder(conn).Encode(event); err != nil {
-		return err
-	}
-	return nil
+	return node.sendToMember(&Member{
+		Addr: net.ParseIP(host),
+		Port: uint16(port),
+	}, event)
 }
 
 // Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method, additionally the node will gossip with other nodes. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
-	log.Printf("Starting gossip routine...\n")
-	// go node.gossip()
+	go node.gossip()
 
 	failCounter := 0
 loop:
@@ -121,7 +136,6 @@ loop:
 
 			conn, err := node.Accept()
 			if err != nil {
-				log.Printf("Connection error occured, retrying listening...\n")
 				failCounter++
 				continue
 			}
@@ -135,12 +149,22 @@ loop:
 					log.Printf("An error occured during communication with a peer: %v\n", err)
 					return
 				}
+				if event.Hops > MaximumHops {
+					// Discard the message.
+					log.Printf("Maximum hops exceeded for message.\n")
+					return
+				}
 
-				log.Printf("Passing event to handle...\n")
-				if err := node.handle(event); err != nil {
+				if event.Time > node.clock.Time() {
+					node.clock.Set(event.Time)
+				}
+				node.clock.Increment()
+
+				if err := node.handle(&event); err != nil {
 					log.Printf("An error occured during handling of an event: %v\n", err)
 					return
 				}
+				log.Printf("Members after operation: %v\n", len(node.members))
 			}(conn)
 		}
 	}
@@ -150,7 +174,7 @@ loop:
 		SenderID: node.ID,
 	}
 
-	if err = node.sendPeer(event); err != nil {
+	if err = node.sendToRandomMember(event); err != nil {
 		log.Printf("Error during communication with a peer: %v\n", err)
 	}
 
@@ -218,14 +242,9 @@ loop:
 		default:
 			if time.Since(lastGossipTime) > communicationTimeout {
 				if len(node.eventQueue) != 0 {
-					log.Printf("Processing next event in queue...\n")
-					var event *Event
-					node.queueMutex.Lock()
-					event = node.eventQueue[0]
+					event := node.eventQueue[0]
 					node.eventQueue = node.eventQueue[1:]
-					node.queueMutex.Unlock()
-
-					if err := node.sendPeer(event); err != nil {
+					if err := node.sendToRandomMember(event); err != nil {
 						log.Printf("An error occured during communication with a peer: %v\n", err)
 						continue
 					}
@@ -236,49 +255,50 @@ loop:
 	}
 }
 
-func (node *Node) handle(event Event) (err error) {
-	log.Printf("Handling an event...\n")
+func (node *Node) handle(event *Event) (err error) {
 	switch event.Event {
 	case Join:
-		log.Printf("Join event received from peer.\n")
+		log.Printf("[EVENT] Join")
+		node.addEvent(event)
 
-		node.queueMutex.Lock()
-		node.eventQueue = append(node.eventQueue, &event)
-		node.queueMutex.Unlock()
-
-		portStr := strconv.Itoa(int(event.Port))
-		hostPort := net.JoinHostPort(event.Addr.String(), portStr)
-		conn, err := net.Dial("tcp", hostPort)
-		if err != nil {
-			return err
+		if event.Origin.ID == node.ID {
+			// Ignore this event, since it originated at the local node.
+			return nil
 		}
-		defer conn.Close()
 
-		members := make([]Member, len(node.members))
-		for i, member := range node.members {
-			members[i] = *member
-		}
-		members = append(members, Member{
-			ID:   node.ID,
-			Addr: node.Addr,
-			Port: node.Port,
-		})
+		if event.TransferRequired {
+			event.TransferRequired = false
+			response := &Event{
+				Event:            Transfer,
+				SenderID:         node.ID,
+				Origin:           event.Origin,
+				TransferRequired: false,
+			}
 
-		response.Members = members
+			var members []Member
+			for _, m := range node.members {
+				members = append(members, *m)
+			}
+			members = append(members, Member{
+				ID:   node.ID,
+				Addr: node.Addr,
+				Port: node.Port,
+			})
 
-		log.Printf("Transfering the following members: %v\n", response.Members)
-		if err = node.sendToMember(&event.Origin, response); err != nil {
-			return err
+			response.Members = members
+			if err = node.sendToMember(&event.Origin, response); err != nil {
+				return err
+			}
 		}
 
 		node.addMember(&event.Origin)
 	case Transfer:
+		log.Printf("[EVENT] Transfer")
 		for _, m := range event.Members {
 			node.addMember(&m)
 		}
-		log.Printf("Members: %v\n", node.members)
 	case Leave:
-		log.Printf("Leave event received from peer.\n")
+		log.Printf("[EVENT] Leave")
 		if err = node.removeMember(event.SenderID); err != nil {
 			log.Printf("Tried to remove an unknown member.")
 		}
@@ -300,7 +320,9 @@ func (node *Node) addEvent(event *Event) (err error) {
 	}
 
 	event.Hops++
+	node.mutex.Lock()
 	node.eventQueue = append(node.eventQueue, event)
+	node.mutex.Unlock()
 	return nil
 }
 
@@ -309,6 +331,7 @@ func (node *Node) addMember(member *Member) (err error) {
 		return errors.New("Member may not be nil.")
 	}
 
+	node.mutex.Lock()
 	found := false
 	for _, m := range node.members {
 		if m.ID == member.ID {
@@ -321,11 +344,13 @@ func (node *Node) addMember(member *Member) (err error) {
 	}
 
 	node.members = append(node.members, member)
+	node.mutex.Unlock()
 	log.Printf("Members: %v\n", node.members)
 	return nil
 }
 
 func (node *Node) removeMember(id uuid.UUID) (err error) {
+	node.mutex.Lock()
 	found := false
 	for i, m := range node.members {
 		if m.ID == id {
@@ -333,6 +358,7 @@ func (node *Node) removeMember(id uuid.UUID) (err error) {
 			found = true
 		}
 	}
+	node.mutex.Unlock()
 
 	if !found {
 		return errors.New("Member has not been found in memberlist.")
