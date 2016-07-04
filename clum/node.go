@@ -16,21 +16,17 @@ const (
 	// MaxConnFailures defines how many connection failures may happen, before the node terminates execution.
 	maxConnFailures      = 5
 	communicationTimeout = time.Second * 3
-	MaximumHops          = 10
 )
 
 // Node is the representation of a node in the cluster.
 type Node struct {
-	*net.TCPListener
-
 	Member
-	members MemberList
+	members *MemberList
 
-	events EventQueue
+	listener *net.TCPListener
 
 	clock LogicalClock
-
-	stop chan bool
+	stop  chan bool
 }
 
 // New creates a new Node that listens on the address host.
@@ -64,20 +60,20 @@ func New(host string) (node *Node, err error) {
 			Addr: addr,
 			Port: uint16(port),
 		},
-
-		events: EventQueue{},
-
-		clock: &LamportClock{},
-
-		stop: make(chan bool, 1),
+		members: NewMemberList(),
+		clock:   &LamportClock{},
+		stop:    make(chan bool, 1),
 	}
+
+	// Subscribe as observer to the member list.
+	node.members.Subscribe(node)
 
 	// Create a tcp listener with the host argument.
 	tcpAddr, err := net.ResolveTCPAddr("tcp", host)
 	if err != nil {
 		return nil, err
 	}
-	if node.TCPListener, err = net.ListenTCP("tcp", tcpAddr); err != nil {
+	if node.listener, err = net.ListenTCP("tcp", tcpAddr); err != nil {
 		return nil, err
 	}
 
@@ -90,12 +86,13 @@ func (node *Node) Join(host string) (err error) {
 	log.Printf("Trying to join cluster on %v\n", host)
 
 	event := &Event{
-		Origin: Member{
+		SenderID:  node.ID,
+		Operation: Join,
+		Origin: &Member{
 			ID:   node.ID,
 			Addr: node.Addr,
 			Port: node.Port,
 		},
-		TransferRequired: true,
 	}
 
 	host, portStr, err := net.SplitHostPort(host)
@@ -115,8 +112,6 @@ func (node *Node) Join(host string) (err error) {
 
 // Run starts a loop in which the node accepts incoming connections and lets them be handled by the handle-method, additionally the node will gossip with other nodes. Should the amount of connection failures exceed maxConnFailures, an error will be returned. The loop can be stopped in a controlled manner by calling the Stop-method.
 func (node *Node) Run() (err error) {
-	go node.gossip()
-
 	failCounter := 0
 loop:
 	for {
@@ -125,12 +120,13 @@ loop:
 			log.Printf("Stopping handle routine.\n")
 			break loop
 		default:
+			// If we exceed the maximum amount of connection failures, exit the loop.
 			if failCounter >= maxConnFailures {
 				err = errors.New("Maximum amount of connection failures exceeded.")
 				break loop
 			}
 
-			conn, err := node.Accept()
+			conn, err := node.listener.Accept()
 			if err != nil {
 				failCounter++
 				continue
@@ -149,6 +145,7 @@ loop:
 					log.Printf("handle: %v\n", err)
 					return
 				}
+				log.Printf("Members: %v\n", node.members.Length())
 			}(conn)
 		}
 	}
@@ -156,6 +153,7 @@ loop:
 	event := Event{
 		Operation: Leave,
 		SenderID:  node.ID,
+		Origin:    &node.Member,
 	}
 
 	if err = node.sendToRandomMember(&event); err != nil {
@@ -172,10 +170,13 @@ func (node *Node) receive(conn net.Conn) (event *Event, err error) {
 		return nil, errors.New("Connection may not be nil.")
 	}
 
+	// Receive the event and decode it.
+	event = new(Event)
 	if err := gob.NewDecoder(conn).Decode(event); err != nil {
 		return nil, err
 	}
 
+	// Update logical clock time.
 	if event.Time > node.clock.Time() {
 		node.clock.Set(event.Time)
 	}
@@ -201,8 +202,6 @@ func (node *Node) sendToMember(member *Member, event *Event) (err error) {
 	}
 	defer conn.Close()
 
-	// Set event sender id.
-	event.SenderID = node.ID
 	// Set time in event and increment it.
 	event.Time = node.clock.Time()
 	node.clock.Increment()
@@ -219,99 +218,83 @@ func (node *Node) sendToRandomMember(event *Event) (err error) {
 		return errors.New("Event may not be nil.")
 	}
 
-	if len(node.members) == 0 {
+	if node.members.Length() == 0 {
 		return errors.New("No members registered.")
 	}
 	rand.Seed(time.Now().UTC().UnixNano())
-	index := rand.Intn(len(node.members)
+	index := rand.Intn(node.members.Length())
 
-	if err := node.sendToMember(node.members[index], event); err != nil {
+	if err := node.sendToMember(node.members.Members()[index], event); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (node *Node) gossip() {
-	lastGossipTime := time.Now()
-loop:
-	for {
-		select {
-		case <-node.stop:
-			log.Printf("Stopping gossip routine.\n")
-			break loop
-		default:
-			if time.Since(lastGossipTime) > communicationTimeout {
-				if len(node.eventQueue) != 0 {
-					event := node.eventQueue[0]
-					node.eventQueue = node.eventQueue[1:]
-					if err := node.sendToRandomMember(event); err != nil {
-						log.Printf("An error occured during communication with a peer: %v\n", err)
-						continue
-					}
-				}
-				lastGossipTime = time.Now()
-			}
+func (node *Node) handle(event *Event) (err error) {
+	log.Printf("Time: %v\n", event.Time)
+	switch event.Operation {
+	case Join:
+		log.Printf("Operation: Join\n")
+		// Create Transfer event and prepare members for transport.
+		response := &Event{
+			SenderID:  node.ID,
+			Operation: Transfer,
 		}
+
+		members := make([]*Member, node.members.Length())
+		copy(members, node.members.Members())
+		members = append(members, &node.Member)
+		response.Members = members
+		// Send the transfer message to the new member.
+		node.sendToMember(event.Origin, response)
+
+		// Add new member to memberlist.
+		node.members.Add(event.Origin)
+	case Transfer:
+		log.Printf("Operation: Transfer\n")
+		log.Printf("Transfering %v members...\n", len(event.Members))
+		node.members.SetMembers(event.Members)
+	case Leave:
+		log.Printf("Operation: Leave\n")
+		node.members.Remove(event.Origin)
+	case NotifyJoin:
+		log.Printf("Operation: NotifyJoin\n")
+		if event.Origin.ID != node.ID {
+			node.members.Add(event.Origin)
+		}
+	case NotifyLeave:
+		log.Printf("Operation: NotifyLeave\n")
+		node.members.Remove(event.Origin)
+	default:
+		return errors.New("Unknown operation requested.")
 	}
+	return nil
 }
 
-func (node *Node) handle(event *Event) (err error) {
-	switch event.Event {
-	case Join:
-		log.Printf("[EVENT] Join")
-		node.addEvent(event)
-
-		if event.Origin.ID == node.ID {
-			// Ignore this event, since it originated at the local node.
-			return nil
-		}
-
-		if event.TransferRequired {
-			event.TransferRequired = false
-			response := &Event{
-				Event:            Transfer,
-				SenderID:         node.ID,
-				Origin:           event.Origin,
-				TransferRequired: false,
-			}
-
-			var members []Member
-			for _, m := range node.members {
-				members = append(members, *m)
-			}
-			members = append(members, Member{
-				ID:   node.ID,
-				Addr: node.Addr,
-				Port: node.Port,
-			})
-
-			response.Members = members
-			if err = node.sendToMember(&event.Origin, response); err != nil {
-				return err
-			}
-		}
-
-		node.addMember(&event.Origin)
-	case Transfer:
-		log.Printf("[EVENT] Transfer")
-		for _, m := range event.Members {
-			node.addMember(&m)
-		}
-	case Leave:
-		log.Printf("[EVENT] Leave")
-		if err = node.removeMember(event.SenderID); err != nil {
-			log.Printf("Tried to remove an unknown member.")
-		}
-
-		log.Printf("Removed member with the id %v", event.SenderID.String())
-		// Add leave event to eventqueue.
-		node.addEvent(event)
-	default:
-		log.Printf("Unknown event received from peer.\n")
-		err = errors.New("Unknown event type received.")
-
+func (node *Node) update(origin *Member, update updateType) {
+	if node.members.Length() == 0 {
+		// No sense in updating, when we don't have a cluster.
+		return
 	}
-	return err
+	event := &Event{
+		SenderID: node.ID,
+		Origin:   origin,
+	}
+
+	switch update {
+	case Add:
+		event.Operation = NotifyJoin
+	case Remove:
+		event.Operation = NotifyLeave
+	}
+
+	// for i := 0; i < node.members.Length()+1; i++ {
+	// 	node.sendToRandomMember(event)
+	// 	time.Sleep(communicationTimeout)
+	// }
+	for _, m := range node.members.Members() {
+		node.sendToMember(m, event)
+	}
 }
 
 // Members returns the members of the node.
@@ -322,6 +305,6 @@ func (node *Node) Members() []*Member {
 // Stop stops execution of the node.
 func (node *Node) Stop() {
 	// Set TCP timeout so listener will die.
-	node.SetDeadline(time.Now())
+	node.listener.SetDeadline(time.Now())
 	node.stop <- true
 }
