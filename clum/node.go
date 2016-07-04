@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/nu7hatch/gouuid"
@@ -22,16 +21,12 @@ const (
 
 // Node is the representation of a node in the cluster.
 type Node struct {
-	ID uuid.UUID
-
-	Addr net.IP
-	Port uint16
 	*net.TCPListener
 
+	Member
 	members MemberList
 
-	eventQueue []*Event
-	mutex      *sync.Mutex
+	events EventQueue
 
 	clock LogicalClock
 
@@ -63,13 +58,14 @@ func New(host string) (node *Node, err error) {
 
 	// Create a new node with the given details.
 	node = &Node{
-		ID: *id,
+		Member: Member{
+			ID: *id,
 
-		Addr: addr,
-		Port: uint16(port),
+			Addr: addr,
+			Port: uint16(port),
+		},
 
-		eventQueue: make([]*Event, 0),
-		mutex:      &sync.Mutex{},
+		events: EventQueue{},
 
 		clock: &LamportClock{},
 
@@ -143,39 +139,27 @@ loop:
 			go func(conn net.Conn) {
 				defer conn.Close()
 
-				var event Event
-				decoder := gob.NewDecoder(conn)
-				if err := decoder.Decode(&event); err != nil {
-					log.Printf("An error occured during communication with a peer: %v\n", err)
-					return
-				}
-				if event.Hops > MaximumHops {
-					// Discard the message.
-					log.Printf("Maximum hops exceeded for message.\n")
+				event, err := node.receive(conn)
+				if err != nil {
+					log.Printf("receive: %v\n", err)
 					return
 				}
 
-				if event.Time > node.clock.Time() {
-					node.clock.Set(event.Time)
-				}
-				node.clock.Increment()
-
-				if err := node.handle(&event); err != nil {
-					log.Printf("An error occured during handling of an event: %v\n", err)
+				if err := node.handle(event); err != nil {
+					log.Printf("handle: %v\n", err)
 					return
 				}
-				log.Printf("Members after operation: %v\n", len(node.members))
 			}(conn)
 		}
 	}
 	log.Printf("Trying to leave cluster...\n")
-	event := &Event{
-		Event:    Leave,
-		SenderID: node.ID,
+	event := Event{
+		Operation: Leave,
+		SenderID:  node.ID,
 	}
 
-	if err = node.sendToRandomMember(event); err != nil {
-		log.Printf("Error during communication with a peer: %v\n", err)
+	if err = node.sendToRandomMember(&event); err != nil {
+		log.Printf("sendToRandomMember: %v\n", err)
 	}
 
 	log.Printf("Cleaning up...\n")
@@ -239,7 +223,7 @@ func (node *Node) sendToRandomMember(event *Event) (err error) {
 		return errors.New("No members registered.")
 	}
 	rand.Seed(time.Now().UTC().UnixNano())
-	index := rand.Intn(len(node.members))
+	index := rand.Intn(len(node.members)
 
 	if err := node.sendToMember(node.members[index], event); err != nil {
 		return err
@@ -330,61 +314,9 @@ func (node *Node) handle(event *Event) (err error) {
 	return err
 }
 
-func (node *Node) addEvent(event *Event) (err error) {
-	if event == nil {
-		return errors.New("Event may not be nil.")
-	}
-
-	event.Hops++
-	node.mutex.Lock()
-	node.eventQueue = append(node.eventQueue, event)
-	node.mutex.Unlock()
-	return nil
-}
-
-func (node *Node) addMember(member *Member) (err error) {
-	if member == nil {
-		return errors.New("Member may not be nil.")
-	}
-
-	node.mutex.Lock()
-	found := false
-	for _, m := range node.members {
-		if m.ID == member.ID {
-			found = true
-		}
-	}
-
-	if found {
-		return errors.New("Member already registered with node.")
-	}
-
-	node.members = append(node.members, member)
-	node.mutex.Unlock()
-	log.Printf("Members: %v\n", node.members)
-	return nil
-}
-
-func (node *Node) removeMember(id uuid.UUID) (err error) {
-	node.mutex.Lock()
-	found := false
-	for i, m := range node.members {
-		if m.ID == id {
-			node.members = append(node.members[:i], node.members[i+1:]...)
-			found = true
-		}
-	}
-	node.mutex.Unlock()
-
-	if !found {
-		return errors.New("Member has not been found in memberlist.")
-	}
-	return nil
-}
-
 // Members returns the members of the node.
 func (node *Node) Members() []*Member {
-	return node.members
+	return node.Members()
 }
 
 // Stop stops execution of the node.
