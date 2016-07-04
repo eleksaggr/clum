@@ -2,6 +2,7 @@ package clum
 
 import (
 	"errors"
+	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -58,7 +59,7 @@ func TestLeave(t *testing.T) {
 	stopChan := make(chan bool)
 	go func(stop chan bool) {
 		if err := node1.Run(); err != nil {
-			t.Errorf("%v\n", err)
+			log.Printf("Err: %v\n", err)
 		}
 		stop <- true
 	}(stopChan)
@@ -79,44 +80,14 @@ func TestLeave(t *testing.T) {
 	}
 }
 
-func TestHandleLeave(t *testing.T) {
+func TestHandleWrongOperation(t *testing.T) {
 	node, err := tryCreateNode()
 	if err != nil {
 		t.Fatalf("%v\n", err)
 	}
 
-	node.members = append(node.members, &Member{
-		ID: [16]byte{},
-	})
-
-	event := Event{
-		Event:    Leave,
-		SenderID: [16]byte{},
-
-		Addr: net.ParseIP("localhost"),
-		Port: 0,
-
-		LamportTime: 1,
-	}
-
-	if err = node.handle(event); err != nil {
-		t.Error("Error during handling of Leave event.")
-	}
-
-	members := node.Members()
-	if len(members) != 0 {
-		t.Error("Member has not been removed by event.")
-	}
-}
-
-func TestHandleWrongEvent(t *testing.T) {
-	node, err := tryCreateNode()
-	if err != nil {
-		t.Fatalf("%v\n", err)
-	}
-
-	event := Event{
-		Event: 255,
+	event := &Event{
+		Operation: 255,
 	}
 	if err = node.handle(event); err == nil {
 		t.Error("Error during handling of unrecognized event.")
@@ -129,18 +100,19 @@ func TestHandleLeaveUnknownMember(t *testing.T) {
 		t.Fatalf("%v\n", err)
 	}
 
-	node.members = append(node.members, &Member{
+	node.members.Add(&Member{
 		ID: [16]byte{},
 	})
 
-	event := Event{
-		Event:    Leave,
-		SenderID: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+	event := &Event{
+		Operation: Leave,
+		SenderID:  [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 
-		Addr: net.ParseIP("localhost"),
-		Port: 0,
-
-		LamportTime: 1,
+		Origin: &Member{
+			ID:   [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Addr: net.ParseIP("localhost"),
+			Port: 0,
+		},
 	}
 
 	if err = node.handle(event); err != nil {
@@ -159,14 +131,15 @@ func TestHandleLeaveNoMembers(t *testing.T) {
 		t.Fatalf("%v\n", err)
 	}
 
-	event := Event{
-		Event:    Leave,
-		SenderID: [16]byte{},
+	event := &Event{
+		Operation: Leave,
+		SenderID:  [16]byte{},
 
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 0,
-
-		LamportTime: 1,
+		Origin: &Member{
+			ID:   [16]byte{},
+			Addr: net.ParseIP("127.0.0.1"),
+			Port: 0,
+		},
 	}
 
 	if err = node.handle(event); err != nil {
