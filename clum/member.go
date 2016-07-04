@@ -3,6 +3,7 @@ package clum
 import (
 	"errors"
 	"net"
+	"strconv"
 	"sync"
 
 	"github.com/nu7hatch/gouuid"
@@ -14,6 +15,11 @@ type Member struct {
 
 	Addr net.IP
 	Port uint16
+}
+
+func (m *Member) Host() string {
+	portStr := strconv.Itoa(int(m.Port))
+	return net.JoinHostPort(m.Addr.String(), portStr)
 }
 
 // MemberList is a thread-safe structure that manages a list of members.
