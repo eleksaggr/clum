@@ -299,7 +299,7 @@ func (node *Node) update(origin *Member, update updateType) {
 
 // Members returns the members of the node.
 func (node *Node) Members() []*Member {
-	return node.Members()
+	return node.members.Members()
 }
 
 // Stop stops execution of the node.
